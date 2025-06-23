@@ -113,7 +113,7 @@ Generate a paired current-state view in models/views/ when asked.
 ---
 
 🔄  5. Transformations with PySpark
-Each job lives under src/transforms/<layer>/<name>.py.
+Each job lives under src/transforms/<database>/<name>.py.
 
 follows signature def run(spark: SparkSession, cfg: Config): …
 

@@ -1,0 +1,130 @@
+# Medallion Lakehouse - Airflow + Spark Development Environment
+# Based on Apache Airflow official docker-compose.yaml
+# Adapted to use existing PostgreSQL instance for all databases
+
+x-airflow-common:
+  &airflow-common
+  # Use optimized image with PySpark
+  build: 
+    context: ./docker/airflow
+    dockerfile: Dockerfile
+  environment:
+    &airflow-common-env
+    # Airflow configuration - connects to existing PostgreSQL
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor  # Simplified for development
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres@host.docker.internal:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'  # Don't load examples
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    
+    # Medallion-specific environment variables
+    MEDALLION_DB_HOST: host.docker.internal
+    MEDALLION_DB_PORT: 5432
+    MEDALLION_DB_USER: postgres
+    MEDALLION_PAGILA_DATABASE: pagila
+    MEDALLION_SOURCE_SCHEMA: public
+    
+    # Python path for medallion modules
+    PYTHONPATH: /opt/medallion
+    
+    # Memory optimization for local development
+    SPARK_DRIVER_MEMORY: 512m
+    SPARK_EXECUTOR_MEMORY: 512m
+    SPARK_DRIVER_MAX_RESULT_SIZE: 256m
+    
+  volumes:
+    # Standard Airflow volumes
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+    
+    # Medallion-specific volumes
+    - ${AIRFLOW_PROJ_DIR:-.}/src:/opt/medallion/src:ro
+    - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/medallion/scripts:ro
+    - ${AIRFLOW_PROJ_DIR:-.}/utils:/opt/medallion/utils:ro
+    - ${AIRFLOW_PROJ_DIR:-.}/.venv:/opt/medallion/.venv:ro
+    
+  user: "${AIRFLOW_UID:-50000}:0"
+  networks:
+    - medallion
+
+services:
+  # Note: No postgres service - using existing external PostgreSQL instance
+  
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: medallion-airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: medallion-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: medallion-airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        # Create airflow database if it doesn't exist
+        echo "Creating airflow database if needed..."
+        PGPASSWORD= psql -h host.docker.internal -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'airflow'" | grep -q 1 || PGPASSWORD= psql -h host.docker.internal -U postgres -c "CREATE DATABASE airflow;"
+        
+        # Initialize Airflow
+        echo "Initializing Airflow database..."
+        airflow db migrate
+        
+        # Create admin user
+        echo "Creating admin user..."
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@medallion.dev \
+          --password admin
+        
+        echo "Initialization complete!"
+    environment:
+      <<: *airflow-common-env
+    restart: "no"
+
+networks:
+  medallion:
+    driver: bridge
+
+# Note: No volumes section - using external PostgreSQL data persistence

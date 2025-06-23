@@ -18,7 +18,18 @@
       "Bash(psql:*)",
       "Bash(echo:*)",
       "Bash(rg:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(curl:*)",
+      "Bash(/dev/null)",
+      "Bash(timeout:*)",
+      "Bash(source ~/.bashrc)",
+      "Bash(docker:*)",
+      "WebFetch(domain:docs.docker.com)",
+      "Bash(cat:*)",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe\" --version)",
+      "Bash(tasklist.exe)",
+      "Bash(sc.exe query:*)",
+      "Bash(mount)"
     ],
     "deny": []
   }
