@@ -29,7 +29,9 @@
       "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe\" --version)",
       "Bash(tasklist.exe)",
       "Bash(sc.exe query:*)",
-      "Bash(mount)"
+      "Bash(mount)",
+      "WebFetch(domain:spark.apache.org)",
+      "Bash(./check_bronze_status.sh:*)"
     ],
     "deny": []
   }
