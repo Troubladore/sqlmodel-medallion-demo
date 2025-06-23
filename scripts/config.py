@@ -1,0 +1,6 @@
+DEFAULT_DATABASE_NAME = ""  # Empty means create all discovered databases
+DEFAULT_DB_ENGINE_TYPE = "postgres"
+DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_USER_NAME = "postgres"
+DEFAULT_HOST = "localhost"
+DEFAULT_PORT = 5432

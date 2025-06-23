@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(python:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(.venv/Scripts/python.exe scripts/build_relationships.py:*)",
+      "Bash(timeout 30:*)",
+      "Bash(.venv/Scripts/python.exe scripts/build_reference_data.py:*)",
+      "Bash(.venv/Scripts/python.exe scripts/build_reference_data_improved.py:*)",
+      "Bash(CONTINUE_ON_ERROR=true .venv/Scripts/python.exe scripts/build_reference_data_improved.py)",
+      "Bash(.venv/Scripts/python.exe scripts/migrate_reference_tables.py:*)",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(psql:*)",
+      "Bash(echo:*)",
+      "Bash(rg:*)",
+      "Bash(git checkout:*)"
+    ],
+    "deny": []
+  }
+}
