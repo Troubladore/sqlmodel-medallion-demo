@@ -30,7 +30,7 @@ x-airflow-common:
     # Python path for medallion modules
     PYTHONPATH: /opt/medallion
     
-    # Memory optimization for local development
+    # Memory optimization for local development (meets Spark 4.0.0 minimum requirements)
     SPARK_DRIVER_MEMORY: 512m
     SPARK_EXECUTOR_MEMORY: 512m
     SPARK_DRIVER_MAX_RESULT_SIZE: 256m
@@ -71,7 +71,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
         reservations:
           memory: 512M
 
@@ -89,7 +89,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
         reservations:
           memory: 512M
 
