@@ -106,21 +106,23 @@ def run_bronze_ingestion(**context) -> Dict[str, Any]:
     # Get execution date from Airflow context
     execution_date = context['ds']  # YYYY-MM-DD format
     
-    # Initialize Spark session with Spark 4.0.0 optimizations
+    # Initialize Spark session with memory-optimized settings for container environment
     spark = (SparkSession.builder
              .appName(f"Bronze_Basic_Pagila_{execution_date}")
-             # Enhanced Adaptive Query Execution (AQE) in Spark 4.0.0
+             # Memory settings for container environment
+             .config("spark.executor.memory", "1g")
+             .config("spark.driver.memory", "1g")
+             .config("spark.executor.cores", "2")
              .config("spark.sql.adaptive.enabled", "true")
              .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
              .config("spark.sql.adaptive.localShuffleReader.enabled", "true")
-             .config("spark.sql.adaptive.skewJoin.enabled", "true")
-             # ANSI SQL mode for better data integrity (default in 4.0.0)
-             .config("spark.sql.ansi.enabled", "true")
-             # Enhanced performance settings
+             # Simplified configuration for stability
              .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-             .config("spark.sql.execution.arrow.pyspark.enabled", "true")
+             .config("spark.sql.execution.arrow.pyspark.enabled", "false")  # Disable Arrow for stability
              # JDBC driver configuration
              .config("spark.jars", "/opt/spark/jars/postgresql.jar")
+             # Local mode settings
+             .master("local[2]")
              .getOrCreate())
     
     try:

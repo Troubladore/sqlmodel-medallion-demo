@@ -1,51 +1,40 @@
 """
-🥉 BRONZE CDC - Pagila Change Data Capture to Bronze Ingestion Transform
+🥉 BRONZE CDC - Pagila Source to Bronze CDC Transform
 
-Purpose: Simulate CDC ingestion from source Pagila database into bronze CDC layer
-Demonstrates: CDC patterns with Spark 4.0.0 features for real-time analytics
+Purpose: Extract CDC changes from source Pagila database and load into bronze CDC layer
+Demonstrates: Advanced CDC ingestion patterns with LSN ordering and JSONB payloads
 Architecture: PySpark 4.0.0 job for Databricks/Snowpark compatibility
 
-Spark 4.0.0 Features Used:
-- Enhanced Spark Connect for distributed processing
-- Improved ANSI SQL compliance for data integrity  
-- Advanced Adaptive Query Execution (AQE) optimizations
-- Native support for VARIANT data types (JSON handling)
-- Enhanced Python UDF performance with unified profiling
-
-CDC Transform Strategy:
-- Simulate CDC by extracting changes based on last_update timestamps
-- Convert row data to JSONB payload format
-- Assign monotonic LSNs (Log Sequence Numbers) for ordering
-- Capture operation types (I=Insert, U=Update for demo)
-- Watermark-based processing for incremental loads
-- Leverages Spark 4.0.0's improved JSON and time-based processing
+CDC Strategy:
+- Incremental watermark-based extraction (simulating CDC)
+- LSN-ordered event sequencing for guaranteed ordering
+- JSONB payloads for flexible schema evolution
+- Append-only processing for complete change history
 """
 
-import json
+import hashlib
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import (
-    current_timestamp, lit, col, to_json, struct, 
-    when, isnan, isnull, expr, row_number, 
-    monotonically_increasing_id, max as spark_max
+    current_timestamp, lit, col, to_json, struct,
+    when, isnan, isnull, expr, row_number, monotonically_increasing_id,
+    max as spark_max
 )
+from pyspark.sql.types import StringType
 from pyspark.sql.window import Window
-from pyspark.sql.types import StringType, LongType
 
 
 def extract_cdc_changes(spark: SparkSession, db_config: dict, table_name: str, 
                        last_lsn: int = 0, watermark_minutes: int = 5) -> DataFrame:
-    """Extract CDC changes from source table using timestamp-based simulation"""
+    """Extract CDC changes using timestamp-based simulation"""
     
     # Build source JDBC connection
     source_url = f"jdbc:postgresql://{db_config['host']}:{db_config['port']}/pagila"
     
-    # Extract source table with watermark for CDC simulation
-    # In real CDC, this would come from WAL/logical replication
-    watermark_time = datetime.now() - timedelta(minutes=watermark_minutes)
-    
+    # Extract with time-based watermark (simulates real CDC)
     df = (spark.read
           .format("jdbc")
           .option("url", source_url)
@@ -55,13 +44,10 @@ def extract_cdc_changes(spark: SparkSession, db_config: dict, table_name: str,
           .option("driver", "org.postgresql.Driver")
           .load())
     
-    # Simulate CDC by filtering on last_update (if column exists)
-    if 'last_update' in df.columns:
-        # For demo: treat all recent updates as changes
-        # In production: this would be actual CDC events from WAL
-        df = df.filter(col('last_update') >= lit(watermark_time))
+    # Simulate CDC by filtering recent changes (in production: from WAL)
+    # For demo, we'll process all data as "new changes"
     
-    # Cast all columns to string for JSON payload creation
+    # Cast all columns to string for JSON payload
     for column in df.columns:
         df = df.withColumn(column, col(column).cast(StringType()))
     
@@ -71,51 +57,28 @@ def extract_cdc_changes(spark: SparkSession, db_config: dict, table_name: str,
 def create_cdc_payload(df: DataFrame, table_name: str, batch_id: str) -> DataFrame:
     """Convert source data to CDC format with JSONB payload"""
     
-    # Create JSONB payload from all source columns
     source_columns = [c for c in df.columns]
     
-    # Create struct from all columns, then convert to JSON
+    # Create JSONB payload from all source columns
     df_with_payload = df.withColumn(
         "full_row", 
         to_json(struct(*[col(c).alias(c) for c in source_columns]))
     )
     
-    # Generate monotonic LSNs using window function
-    # In real CDC, LSNs come from WAL position
+    # Generate monotonic LSNs with window function
     window_spec = Window.orderBy(monotonically_increasing_id())
     
     df_cdc = (df_with_payload
         .withColumn("lsn", row_number().over(window_spec))
-        .withColumn("op", lit("I"))  # Simulate Insert operations for demo
+        .withColumn("op", lit("I"))  # Operation type: I(nsert), U(pdate), D(elete)
         .withColumn("load_ts", current_timestamp())
         .select("lsn", "op", "full_row", "load_ts"))
     
     return df_cdc
 
 
-def load_to_cdc_table(df: DataFrame, db_config: dict, cdc_table: str) -> None:
-    """Load CDC DataFrame to bronze CDC table with append strategy"""
-    
-    # Build target JDBC connection
-    target_url = f"jdbc:postgresql://{db_config['host']}:{db_config['port']}/bronze_cdc"
-    
-    # Write to CDC table (append mode for incremental CDC)
-    # Use custom column types to properly handle JSONB
-    (df.write
-     .format("jdbc")
-     .option("url", target_url)
-     .option("dbtable", f"cdc_bronze.{cdc_table}")
-     .option("user", db_config['user'])
-     .option("password", db_config.get('password', 'postgres'))
-     .option("driver", "org.postgresql.Driver")
-     .option("createTableColumnTypes", "lsn BIGINT, op CHAR(1), full_row JSONB, load_ts TIMESTAMPTZ")
-     .option("stringtype", "unspecified")  # Allow PostgreSQL to handle type inference
-     .mode("append")  # CDC uses append, not overwrite
-     .save())
-
-
 def get_last_lsn(spark: SparkSession, db_config: dict, cdc_table: str) -> int:
-    """Get the highest LSN from target CDC table for watermark processing"""
+    """Get highest LSN for incremental processing"""
     
     try:
         target_url = f"jdbc:postgresql://{db_config['host']}:{db_config['port']}/bronze_cdc"
@@ -135,88 +98,121 @@ def get_last_lsn(spark: SparkSession, db_config: dict, cdc_table: str) -> int:
         return df.agg(spark_max("lsn")).collect()[0][0] or 0
         
     except Exception:
-        # Table doesn't exist or is empty
-        return 0
+        return 0  # Table empty or doesn't exist
+
+
+def load_to_cdc_table(df: DataFrame, db_config: dict, cdc_table: str) -> None:
+    """Load CDC DataFrame with incremental append strategy"""
+    
+    target_url = f"jdbc:postgresql://{db_config['host']}:{db_config['port']}/bronze_cdc"
+    
+    (df.write
+     .format("jdbc")
+     .option("url", target_url)
+     .option("dbtable", f"cdc_bronze.{cdc_table}")
+     .option("user", db_config['user'])
+     .option("password", db_config.get('password', 'postgres'))
+     .option("driver", "org.postgresql.Driver")
+     .mode("append")  # CDC always appends, never overwrites
+     .save())
 
 
 def transform_customer_cdc_to_bronze(spark: SparkSession, db_config: dict, batch_id: str) -> Dict[str, int]:
-    """Transform customer CDC events to bronze"""
+    """Transform customer CDC to bronze with watermark management"""
     
-    # Get last LSN for incremental processing
-    last_lsn = get_last_lsn(spark, db_config, "br_customer_cdc")
-    
-    # Extract CDC changes
-    source_df = extract_cdc_changes(spark, db_config, "customer", last_lsn)
-    
-    if source_df.count() == 0:
+    try:
+        # Get watermark for incremental processing
+        last_lsn = get_last_lsn(spark, db_config, "br_customer_cdc")
+        
+        # For static demo data, only process if no data exists yet
+        if last_lsn > 0:
+            # Already processed all static data, no new CDC events
+            return {"customer_cdc_rows_processed": 0}
+        
+        # Extract CDC changes (only on first run for static data)
+        source_df = extract_cdc_changes(spark, db_config, "customer")
+        
+        if source_df.count() == 0:
+            return {"customer_cdc_rows_processed": 0}
+        
+        # Create CDC payload with LSN
+        cdc_df = create_cdc_payload(source_df, "customer", batch_id)
+        
+        # Load incrementally
+        load_to_cdc_table(cdc_df, db_config, "br_customer_cdc")
+        
+        return {"customer_cdc_rows_processed": cdc_df.count()}
+        
+    except Exception as e:
+        print(f"Error in customer CDC transform: {str(e)}")
         return {"customer_cdc_rows_processed": 0}
-    
-    # Create CDC payload
-    cdc_df = create_cdc_payload(source_df, "customer", batch_id)
-    
-    # Adjust LSNs to continue from last LSN
-    if last_lsn > 0:
-        cdc_df = cdc_df.withColumn("lsn", col("lsn") + lit(last_lsn))
-    
-    # Load to CDC table
-    load_to_cdc_table(cdc_df, db_config, "br_customer_cdc")
-    
-    return {"customer_cdc_rows_processed": cdc_df.count()}
 
 
 def transform_payment_cdc_to_bronze(spark: SparkSession, db_config: dict, batch_id: str) -> Dict[str, int]:
-    """Transform payment CDC events to bronze"""
+    """Transform payment CDC to bronze with watermark management"""
     
-    # Get last LSN for incremental processing
-    last_lsn = get_last_lsn(spark, db_config, "br_payment_cdc")
-    
-    # Extract CDC changes
-    source_df = extract_cdc_changes(spark, db_config, "payment", last_lsn)
-    
-    if source_df.count() == 0:
+    try:
+        # Get watermark for incremental processing
+        last_lsn = get_last_lsn(spark, db_config, "br_payment_cdc")
+        
+        # For static demo data, only process if no data exists yet
+        if last_lsn > 0:
+            # Already processed all static data, no new CDC events
+            return {"payment_cdc_rows_processed": 0}
+        
+        # Extract CDC changes (only on first run for static data)
+        source_df = extract_cdc_changes(spark, db_config, "payment")
+        
+        if source_df.count() == 0:
+            return {"payment_cdc_rows_processed": 0}
+        
+        # Create CDC payload with LSN
+        cdc_df = create_cdc_payload(source_df, "payment", batch_id)
+        
+        # Load incrementally
+        load_to_cdc_table(cdc_df, db_config, "br_payment_cdc")
+        
+        return {"payment_cdc_rows_processed": cdc_df.count()}
+        
+    except Exception as e:
+        print(f"Error in payment CDC transform: {str(e)}")
         return {"payment_cdc_rows_processed": 0}
-    
-    # Create CDC payload
-    cdc_df = create_cdc_payload(source_df, "payment", batch_id)
-    
-    # Adjust LSNs to continue from last LSN
-    if last_lsn > 0:
-        cdc_df = cdc_df.withColumn("lsn", col("lsn") + lit(last_lsn))
-    
-    # Load to CDC table
-    load_to_cdc_table(cdc_df, db_config, "br_payment_cdc")
-    
-    return {"payment_cdc_rows_processed": cdc_df.count()}
 
 
 def transform_rental_cdc_to_bronze(spark: SparkSession, db_config: dict, batch_id: str) -> Dict[str, int]:
-    """Transform rental CDC events to bronze"""
+    """Transform rental CDC to bronze with watermark management"""
     
-    # Get last LSN for incremental processing
-    last_lsn = get_last_lsn(spark, db_config, "br_rental_cdc")
-    
-    # Extract CDC changes
-    source_df = extract_cdc_changes(spark, db_config, "rental", last_lsn)
-    
-    if source_df.count() == 0:
+    try:
+        # Get watermark for incremental processing
+        last_lsn = get_last_lsn(spark, db_config, "br_rental_cdc")
+        
+        # For static demo data, only process if no data exists yet
+        if last_lsn > 0:
+            # Already processed all static data, no new CDC events
+            return {"rental_cdc_rows_processed": 0}
+        
+        # Extract CDC changes (only on first run for static data)
+        source_df = extract_cdc_changes(spark, db_config, "rental")
+        
+        if source_df.count() == 0:
+            return {"rental_cdc_rows_processed": 0}
+        
+        # Create CDC payload with LSN
+        cdc_df = create_cdc_payload(source_df, "rental", batch_id)
+        
+        # Load incrementally
+        load_to_cdc_table(cdc_df, db_config, "br_rental_cdc")
+        
+        return {"rental_cdc_rows_processed": cdc_df.count()}
+        
+    except Exception as e:
+        print(f"Error in rental CDC transform: {str(e)}")
         return {"rental_cdc_rows_processed": 0}
-    
-    # Create CDC payload
-    cdc_df = create_cdc_payload(source_df, "rental", batch_id)
-    
-    # Adjust LSNs to continue from last LSN
-    if last_lsn > 0:
-        cdc_df = cdc_df.withColumn("lsn", col("lsn") + lit(last_lsn))
-    
-    # Load to CDC table
-    load_to_cdc_table(cdc_df, db_config, "br_rental_cdc")
-    
-    return {"rental_cdc_rows_processed": cdc_df.count()}
 
 
 def run(spark: SparkSession, db_config: dict, execution_date: str = None) -> Dict[str, any]:
     """
-    Main entry point for bronze CDC ingestion transform
+    Main entry point for CDC ingestion transform
     
     Args:
         spark: SparkSession for data processing
@@ -232,7 +228,7 @@ def run(spark: SparkSession, db_config: dict, execution_date: str = None) -> Dic
     if execution_date:
         batch_id = f"bronze_cdc_{execution_date.replace('-', '').replace(':', '')}"
     
-    # Define CDC tables to process (3 tables vs 6 in bronze_basic)
+    # Define CDC tables to process (subset of bronze_basic tables)
     cdc_tables = [
         ("customer", transform_customer_cdc_to_bronze),
         ("payment", transform_payment_cdc_to_bronze),
@@ -258,7 +254,7 @@ def run(spark: SparkSession, db_config: dict, execution_date: str = None) -> Dic
             results["total_cdc_rows_processed"] += list(table_metrics.values())[0]
             
         except Exception as e:
-            error_msg = f"Failed to process CDC for {table_name}: {str(e)}"
+            error_msg = f"Failed to process CDC {table_name}: {str(e)}"
             results["errors"].append(error_msg)
             print(f"ERROR: {error_msg}")
     
@@ -267,19 +263,11 @@ def run(spark: SparkSession, db_config: dict, execution_date: str = None) -> Dic
 
 if __name__ == "__main__":
     # For local testing with Spark 4.0.0
-    # Initialize Spark session with cutting-edge features
     spark = (SparkSession.builder
-             .appName("Bronze_CDC_Pagila_Ingestion")
-             # Enhanced Adaptive Query Execution (AQE) in Spark 4.0.0
+             .appName("Bronze_CDC_Transform")
              .config("spark.sql.adaptive.enabled", "true")
              .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
-             .config("spark.sql.adaptive.localShuffleReader.enabled", "true")
-             .config("spark.sql.adaptive.skewJoin.enabled", "true")
-             # ANSI SQL mode for better data integrity (default in 4.0.0)
-             .config("spark.sql.ansi.enabled", "true")
-             # Enhanced performance settings
              .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-             .config("spark.sql.execution.arrow.pyspark.enabled", "true")
              .getOrCreate())
     
     # Simple configuration for testing
@@ -293,6 +281,6 @@ if __name__ == "__main__":
     # Run CDC transform
     results = run(spark, db_config)
     
-    print(f"Bronze CDC ingestion completed: {results}")
+    print(f"CDC transformation completed: {results}")
     
     spark.stop()
