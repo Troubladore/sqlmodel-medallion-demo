@@ -35,7 +35,7 @@ from pyspark.sql.functions import (
     count, sum as spark_sum, avg, max as spark_max, min as spark_min,
     md5, sha2, expr, row_number, dense_rank, rank,
     to_date, date_format, year, month, dayofmonth, quarter, weekofyear,
-    hour, dayofweek, last_day, add_months, datediff,
+    hour, dayofweek, dayofyear, last_day, add_months, datediff,
     round as spark_round, monotonically_increasing_id,
     broadcast, desc, asc
 )
@@ -79,6 +79,24 @@ def extract_bronze_table(spark: SparkSession, db_config: dict, table_name: str) 
     return df
 
 
+def extract_gold_table(spark: SparkSession, db_config: dict, table_name: str) -> DataFrame:
+    """Extract gold table data with error handling"""
+    
+    # Build gold JDBC connection
+    gold_url = f"jdbc:postgresql://{db_config['host']}:{db_config['port']}/silver_gold_dimensional"
+    
+    df = (spark.read
+          .format("jdbc")
+          .option("url", gold_url)
+          .option("dbtable", f"pagila_gold.{table_name}")
+          .option("user", db_config['user'])
+          .option("password", db_config.get('password', 'postgres'))
+          .option("driver", "org.postgresql.Driver")
+          .load())
+    
+    return df
+
+
 def add_gold_audit_fields(df: DataFrame, source_table: str, batch_id: str) -> DataFrame:
     """Add comprehensive gold audit trail"""
     
@@ -87,9 +105,9 @@ def add_gold_audit_fields(df: DataFrame, source_table: str, batch_id: str) -> Da
         .withColumn("gl_updated_time", current_timestamp())
         .withColumn("gl_source_silver_key", 
             # Map silver key if available, otherwise null
-            col(f"sl_{source_table}_key") if f"sl_{source_table}_key" in df.columns else lit(None))
-        .withColumn("gl_is_current", lit(True))
-        .withColumn("gl_batch_id", lit(batch_id)))
+            col(f"sl_{source_table}_key") if f"sl_{source_table}_key" in df.columns else lit(None).cast(StringType()))
+        .withColumn("gl_is_current", lit(True).cast(BooleanType()))
+        .withColumn("gl_batch_id", lit(batch_id).cast(StringType())))
 
 
 def load_to_gold_table(df: DataFrame, db_config: dict, gold_table: str) -> None:
@@ -115,13 +133,14 @@ def generate_date_dimension(spark: SparkSession) -> DataFrame:
     # Create date range for the next 10 years
     start_date = date(2000, 1, 1)
     end_date = date(2030, 12, 31)
+    total_days = (end_date - start_date).days + 1
     
-    # Generate sequence of dates
-    date_df = spark.range(0, (end_date - start_date).days + 1).select(
-        (lit(start_date.toordinal()) + col("id")).alias("date_ordinal")
+    # Generate sequence of dates using direct date_add from start_date
+    date_df = spark.range(0, total_days).select(
+        col("id").cast(IntegerType()).alias("days_from_start")
     ).withColumn(
         "calendar_date", 
-        expr("date_add('1900-01-01', date_ordinal - 693594)")  # Convert ordinal to date
+        expr(f"date_add('{start_date}', days_from_start)")  # Direct date addition
     )
     
     # Add comprehensive date attributes
@@ -165,6 +184,18 @@ def generate_date_dimension(spark: SparkSession) -> DataFrame:
     )
 
 
+def transform_date_dimension(spark: SparkSession, db_config: dict, batch_id: str) -> Dict[str, int]:
+    """Transform date dimension for gold layer"""
+    
+    # Generate date dimension
+    date_df = generate_date_dimension(spark)
+    
+    # Load to gold table
+    load_to_gold_table(date_df, db_config, "gl_dim_date")
+    
+    return {"gl_dim_date_rows_processed": date_df.count()}
+
+
 def transform_customer_dimension(spark: SparkSession, db_config: dict, batch_id: str) -> Dict[str, int]:
     """Transform silver customer to gold customer dimension with analytics"""
     
@@ -203,10 +234,10 @@ def transform_customer_dimension(spark: SparkSession, db_config: dict, batch_id:
             avg("amount").alias("avg_payment_amount")
         ))
     
-    # Join customer with address and store for denormalization
-    customer_with_address = (silver_customer
-        .join(silver_address, silver_customer.address_id == silver_address.address_id, "left")
-        .join(silver_store, silver_customer.store_id == silver_store.store_id, "left"))
+    # Join customer with address and store for denormalization (use aliases to avoid ambiguous columns)
+    customer_with_address = (silver_customer.alias("c")
+        .join(silver_address.alias("a"), col("c.address_id") == col("a.address_id"), "left")
+        .join(silver_store.alias("s"), col("c.store_id") == col("s.store_id"), "left"))
     
     # Build comprehensive customer dimension
     customer_dim = (customer_with_address
@@ -216,19 +247,19 @@ def transform_customer_dimension(spark: SparkSession, db_config: dict, batch_id:
         # Generate gold surrogate key
         .withColumn("gl_dim_customer_key", expr("uuid()"))
         
-        # Core customer attributes
-        .withColumn("full_name", concat_ws(" ", col("first_name"), col("last_name")))
+        # Core customer attributes (from customer table 'c')
+        .withColumn("full_name", concat_ws(" ", col("c.first_name"), col("c.last_name")))
         
-        # Denormalized address attributes
-        .withColumn("address_line1", coalesce(col("address"), lit("Unknown")))
-        .withColumn("address_line2", col("address2"))
-        .withColumn("district", coalesce(col("district"), lit("Unknown")))
+        # Denormalized address attributes (from address table 'a')
+        .withColumn("address_line1", coalesce(col("a.address"), lit("Unknown")))
+        .withColumn("address_line2", col("a.address2"))
+        .withColumn("district", coalesce(col("a.district"), lit("Unknown")))
         .withColumn("city", lit("Sample City"))  # Placeholder
-        .withColumn("postal_code", coalesce(col("postal_code"), lit("00000")))
-        .withColumn("phone", coalesce(col("phone"), lit("000-000-0000")))
+        .withColumn("postal_code", coalesce(col("a.postal_code"), lit("00000")))
+        .withColumn("phone", coalesce(col("a.phone"), lit("000-000-0000")))
         .withColumn("country", lit("USA"))  # Placeholder
         
-        # Store attributes
+        # Store attributes (from store table 's')
         .withColumn("store_address", lit("Store Address"))  # Placeholder
         .withColumn("store_city", lit("Store City"))  # Placeholder
         
@@ -253,11 +284,15 @@ def transform_customer_dimension(spark: SparkSession, db_config: dict, batch_id:
     # Add gold audit fields
     audit_df = add_gold_audit_fields(customer_dim, "customer", batch_id)
     
-    # Select final gold schema
+    # Select final gold schema (specify table source for potentially ambiguous columns)
     final_df = audit_df.select(
-        "gl_dim_customer_key", "customer_id", "first_name", "last_name", "full_name", "email",
+        "gl_dim_customer_key", col("c.customer_id").alias("customer_id"), 
+        col("c.first_name").alias("first_name"), col("c.last_name").alias("last_name"), 
+        "full_name", col("c.email").alias("email"),
         "address_line1", "address_line2", "district", "city", "postal_code", "phone", "country",
-        "store_id", "store_address", "store_city", "create_date", "activebool", "last_update",
+        col("c.store_id").alias("store_id"), "store_address", "store_city", 
+        col("c.create_date").alias("create_date"), col("c.activebool").alias("activebool"), 
+        col("c.last_update").alias("last_update"),
         "total_rentals", "total_payments", "avg_payment_amount", "first_rental_date", 
         "last_rental_date", "days_since_last_rental", "customer_lifetime_value",
         "customer_tier", "is_high_value", "preferred_genre", "avg_rental_frequency",
@@ -280,15 +315,15 @@ def transform_film_dimension(spark: SparkSession, db_config: dict, batch_id: str
     if silver_film.count() == 0:
         return {"gl_dim_film_rows_processed": 0}
     
-    # Build film dimension with language denormalization
-    film_dim = (silver_film
-        .join(silver_language, "language_id", "left")
+    # Build film dimension with language denormalization (use aliases to avoid ambiguous columns)
+    film_dim = (silver_film.alias("f")
+        .join(silver_language.alias("l"), "language_id", "left")
         
         # Generate gold surrogate key
         .withColumn("gl_dim_film_key", expr("uuid()"))
         
-        # Film attributes
-        .withColumn("language_name", coalesce(col("name"), lit("Unknown")))
+        # Film attributes (specify table aliases for potentially ambiguous columns)
+        .withColumn("language_name", coalesce(col("l.name"), lit("Unknown")))
         .withColumn("film_category", 
             when(col("rating") == "G", "Family")
             .when(col("rating") == "PG", "Family")
@@ -305,12 +340,15 @@ def transform_film_dimension(spark: SparkSession, db_config: dict, batch_id: str
     # Add gold audit fields
     audit_df = add_gold_audit_fields(film_dim, "film", batch_id)
     
-    # Select final gold schema
+    # Select final gold schema (specify table source for potentially ambiguous columns)
     final_df = audit_df.select(
-        "gl_dim_film_key", "film_id", "title", "description", "release_year",
-        "language_id", "language_name", "rental_duration", "rental_rate", "length",
-        "replacement_cost", "rating", "special_features", "film_category",
-        "is_feature_length", "revenue_tier", "last_update",
+        "gl_dim_film_key", col("f.film_id").alias("film_id"), col("f.title").alias("title"), 
+        col("f.description").alias("description"), col("f.release_year").alias("release_year"),
+        col("f.language_id").alias("language_id"), "language_name", col("f.rental_duration").alias("rental_duration"), 
+        col("f.rental_rate").alias("rental_rate"), col("f.length").alias("length"),
+        col("f.replacement_cost").alias("replacement_cost"), col("f.rating").alias("rating"), 
+        col("f.special_features").alias("special_features"), "film_category",
+        "is_feature_length", "revenue_tier", col("f.last_update").alias("last_update"),
         "gl_created_time", "gl_updated_time", "gl_source_silver_key", "gl_is_current"
     )
     
@@ -330,29 +368,29 @@ def transform_store_dimension(spark: SparkSession, db_config: dict, batch_id: st
     if silver_store.count() == 0:
         return {"gl_dim_store_rows_processed": 0}
     
-    # Build store dimension
-    store_dim = (silver_store
-        .join(silver_address, silver_store.address_id == silver_address.address_id, "left")
+    # Build store dimension (use aliases to avoid ambiguous columns)
+    store_dim = (silver_store.alias("s")
+        .join(silver_address.alias("a"), col("s.address_id") == col("a.address_id"), "left")
         
         # Generate gold surrogate key
         .withColumn("gl_dim_store_key", expr("uuid()"))
         
-        # Store attributes with address denormalization
-        .withColumn("store_address", coalesce(col("address"), lit("Unknown Address")))
-        .withColumn("store_district", coalesce(col("district"), lit("Unknown")))
+        # Store attributes with address denormalization (using table aliases)
+        .withColumn("store_address", coalesce(col("a.address"), lit("Unknown Address")))
+        .withColumn("store_district", coalesce(col("a.district"), lit("Unknown")))
         .withColumn("store_city", lit("Sample City"))
-        .withColumn("store_postal_code", coalesce(col("postal_code"), lit("00000")))
-        .withColumn("store_phone", coalesce(col("phone"), lit("000-000-0000")))
+        .withColumn("store_postal_code", coalesce(col("a.postal_code"), lit("00000")))
+        .withColumn("store_phone", coalesce(col("a.phone"), lit("000-000-0000")))
         .withColumn("store_country", lit("USA")))
     
     # Add gold audit fields
     audit_df = add_gold_audit_fields(store_dim, "store", batch_id)
     
-    # Select final gold schema
+    # Select final gold schema (specify table source for potentially ambiguous columns)
     final_df = audit_df.select(
-        "gl_dim_store_key", "store_id", "manager_staff_id", 
+        "gl_dim_store_key", col("s.store_id").alias("store_id"), col("s.manager_staff_id").alias("manager_staff_id"), 
         "store_address", "store_district", "store_city", "store_postal_code",
-        "store_phone", "store_country", "last_update",
+        "store_phone", "store_country", col("s.last_update").alias("last_update"),
         "gl_created_time", "gl_updated_time", "gl_source_silver_key", "gl_is_current"
     )
     
@@ -376,12 +414,12 @@ def transform_staff_dimension(spark: SparkSession, db_config: dict, batch_id: st
         .select("staff_id")
         .distinct()
         .withColumn("staff_id", col("staff_id").cast(IntegerType()))
-        .withColumn("gl_dim_staff_key", expr("uuid()"))
-        .withColumn("first_name", lit("Staff"))
-        .withColumn("last_name", concat(lit("Member "), col("staff_id")))
-        .withColumn("email", concat(lit("staff"), col("staff_id"), lit("@pagila.com")))
-        .withColumn("store_id", lit(1))
-        .withColumn("is_active", lit(True))
+        .withColumn("gl_dim_staff_key", expr("uuid()").cast(StringType()))
+        .withColumn("first_name", lit("Staff").cast(StringType()))
+        .withColumn("last_name", concat(lit("Member "), col("staff_id").cast(StringType())))
+        .withColumn("email", concat(lit("staff"), col("staff_id").cast(StringType()), lit("@pagila.com")))
+        .withColumn("store_id", lit(1).cast(IntegerType()))
+        .withColumn("is_active", lit(True).cast(BooleanType()))
         .withColumn("last_update", current_timestamp()))
     
     # Add gold audit fields
@@ -427,15 +465,34 @@ def transform_rental_fact(spark: SparkSession, db_config: dict, batch_id: str) -
         .withColumn("return_date", col("return_date").cast(TimestampType()))
         .withColumn("staff_id", col("staff_id").cast(IntegerType())))
     
-    # Join with payment data for revenue
-    rental_with_payment = (rental_clean
-        .join(bronze_payment.withColumn("rental_id", col("rental_id").cast(IntegerType())), 
-              "rental_id", "left"))
+    # Join with payment data for revenue (use aliases to avoid column ambiguity)
+    rental_with_payment = (rental_clean.alias("r")
+        .join(bronze_payment.withColumn("rental_id", col("rental_id").cast(IntegerType())).alias("p"), 
+              "rental_id", "left")
+        # Explicitly select columns to resolve ambiguity, taking customer_id from rental (r) not payment (p)
+        .select(
+            col("r.rental_id").alias("rental_id"),
+            col("r.rental_date").alias("rental_date"), 
+            col("r.inventory_id").alias("inventory_id"),
+            col("r.customer_id").alias("customer_id"),  # Take customer_id from rental table
+            col("r.return_date").alias("return_date"),
+            col("r.staff_id").alias("staff_id"),
+            col("r.last_update").alias("last_update"),
+            col("r.br_load_time").alias("br_load_time"),
+            col("r.br_source_file").alias("br_source_file"), 
+            col("r.br_batch_id").alias("br_batch_id"),
+            col("r.br_is_current").alias("br_is_current"),
+            col("r.br_record_hash").alias("br_record_hash"),
+            col("r.br_rental_key").alias("br_rental_key"),
+            # Take payment info from payment table
+            coalesce(col("p.amount"), lit(2.99)).alias("amount"),
+            coalesce(col("p.payment_date"), col("r.rental_date")).alias("payment_date")
+        ))
     
     # Build comprehensive fact table
     fact_rental = (rental_with_payment
         # Generate gold surrogate key
-        .withColumn("gl_fact_rental_key", expr("uuid()"))
+        .withColumn("gl_fact_rental_key", expr("uuid()").cast(StringType()))
         
         # Date dimensions
         .withColumn("rental_date_only", to_date(col("rental_date")))
@@ -451,27 +508,27 @@ def transform_rental_fact(spark: SparkSession, db_config: dict, batch_id: str) -
         .withColumn("rental_duration_actual", 
             when(col("return_date").isNotNull(), 
                  datediff(col("return_date_only"), col("rental_date_only")))
-            .otherwise(None))
-        .withColumn("rental_duration_planned", lit(3))  # Default rental duration
+            .otherwise(lit(None).cast(IntegerType())))
+        .withColumn("rental_duration_planned", lit(3).cast(IntegerType()))  # Default rental duration
         .withColumn("is_returned", col("return_date").isNotNull())
         .withColumn("is_overdue", 
             when(col("return_date").isNotNull(),
                  col("rental_duration_actual") > col("rental_duration_planned"))
-            .otherwise(False))
+            .otherwise(lit(False).cast(BooleanType())))
         .withColumn("days_overdue",
             when(col("is_overdue") == True,
                  col("rental_duration_actual") - col("rental_duration_planned"))
-            .otherwise(0))
+            .otherwise(lit(0).cast(IntegerType())))
         
         # Revenue measures
-        .withColumn("rental_rate", coalesce(col("amount").cast(FloatType()), lit(2.99)))
-        .withColumn("replacement_cost", lit(19.99))  # Default
+        .withColumn("rental_rate", col("amount").cast(FloatType()))
+        .withColumn("replacement_cost", lit(19.99).cast(FloatType()))  # Default
         .withColumn("revenue_amount", col("rental_rate"))
         
         # Analytics flags
         .withColumn("is_weekend_rental", 
-            when(dayofweek("rental_date").isin([1, 7]), True).otherwise(False))
-        .withColumn("is_holiday_rental", lit(False)))  # Placeholder
+            when(dayofweek("rental_date").isin([1, 7]), lit(True).cast(BooleanType())).otherwise(lit(False).cast(BooleanType())))
+        .withColumn("is_holiday_rental", lit(False).cast(BooleanType())))  # Placeholder
     
     # Join with date dimension for date keys
     fact_with_dates = (fact_rental
@@ -482,23 +539,23 @@ def transform_rental_fact(spark: SparkSession, db_config: dict, batch_id: str) -
               col("return_date_only") == col("return_dates.calendar_date"), "left")
         .withColumn("return_date_key", col("return_dates.date_key")))
     
-    # Create placeholder dimension keys (in real scenario, would join with actual gold dimensions)
+    # Create placeholder dimension keys with proper typing
     final_fact = (fact_with_dates
-        .withColumn("customer_key", expr("uuid()"))  # Placeholder
-        .withColumn("film_key", expr("uuid()"))      # Placeholder
-        .withColumn("store_key", expr("uuid()"))     # Placeholder
-        .withColumn("staff_key", expr("uuid()"))     # Placeholder
+        .withColumn("customer_key", expr("uuid()").cast(StringType()))  # Placeholder
+        .withColumn("film_key", expr("uuid()").cast(StringType()))      # Placeholder
+        .withColumn("store_key", expr("uuid()").cast(StringType()))     # Placeholder
+        .withColumn("staff_key", expr("uuid()").cast(StringType()))     # Placeholder
         
         # Handle null date keys
-        .withColumn("rental_date_key", coalesce(col("rental_date_key"), lit(19000101)))
-        .withColumn("return_date_key", coalesce(col("return_date_key"), lit(19000101))))
+        .withColumn("rental_date_key", coalesce(col("rental_date_key"), lit(19000101).cast(IntegerType())))
+        .withColumn("return_date_key", coalesce(col("return_date_key"), lit(19000101).cast(IntegerType()))))
     
     # Add gold audit fields
     audit_df = add_gold_audit_fields(final_fact, "rental", batch_id)
     
-    # Select final gold schema
+    # Select final gold schema including customer_id for metrics calculation
     final_df = audit_df.select(
-        "gl_fact_rental_key", "rental_id", "customer_key", "film_key", "store_key", "staff_key",
+        "gl_fact_rental_key", "rental_id", "customer_id", "customer_key", "film_key", "store_key", "staff_key",
         "rental_date_key", "return_date_key", "rental_date_only", "rental_date", 
         "return_date_only", "return_date", "rental_duration_actual", "rental_duration_planned",
         "rental_rate", "replacement_cost", "is_overdue", "days_overdue", "is_returned",
@@ -516,7 +573,7 @@ def transform_rental_fact(spark: SparkSession, db_config: dict, batch_id: str) -
 def transform_customer_metrics(spark: SparkSession, db_config: dict, batch_id: str) -> Dict[str, int]:
     """Transform data into gold customer metrics table"""
     
-    # Extract fact table for aggregations
+    # STRICT LINEAGE: Gold MUST read from Gold fact table only
     try:
         fact_rental = (spark.read
                       .format("jdbc")
@@ -526,23 +583,17 @@ def transform_customer_metrics(spark: SparkSession, db_config: dict, batch_id: s
                       .option("password", db_config.get('password', 'postgres'))
                       .option("driver", "org.postgresql.Driver")
                       .load())
-    except:
-        # If fact table doesn't exist yet, create from bronze
-        bronze_rental = extract_bronze_table(spark, db_config, "br_rental")
-        bronze_payment = extract_bronze_table(spark, db_config, "br_payment")
-        
-        fact_rental = (bronze_rental
-            .withColumn("customer_id", col("customer_id").cast(IntegerType()))
-            .withColumn("rental_date", col("rental_date").cast(TimestampType()))
-            .join(bronze_payment.withColumn("rental_id", col("rental_id").cast(IntegerType())), 
-                  "rental_id", "left")
-            .withColumn("revenue_amount", col("amount").cast(FloatType())))
+    except Exception as e:
+        # FAIL FAST: Gold layer dependencies must exist
+        raise Exception(f"LINEAGE VIOLATION: gl_fact_rental table required for customer metrics but does not exist. "
+                       f"Ensure fact table is created before metrics. Error: {str(e)}")
     
     if fact_rental.count() == 0:
         return {"gl_customer_metrics_rows_processed": 0}
     
-    # Calculate customer metrics
+    # Calculate customer metrics directly from fact table (fact table has customer_id from bronze data)
     customer_metrics = (fact_rental
+        .withColumn("customer_id", col("customer_id").cast(IntegerType()))  # Ensure proper type
         .groupBy("customer_id")
         .agg(
             count("*").alias("total_rentals"),
@@ -551,13 +602,13 @@ def transform_customer_metrics(spark: SparkSession, db_config: dict, batch_id: s
             spark_max("rental_date").alias("last_rental_date"),
             spark_min("rental_date").alias("first_rental_date")
         )
-        .withColumn("gl_customer_metrics_key", expr("uuid()"))
+        .withColumn("gl_customer_metrics_key", expr("uuid()").cast(StringType()))
         .withColumn("customer_lifetime_value", col("total_revenue"))
         .withColumn("avg_rentals_per_month", 
-            col("total_rentals") / lit(12.0))  # Estimate
+            col("total_rentals") / lit(12.0).cast(FloatType()))  # Estimate
         .withColumn("customer_score",
-            (col("total_rentals") * lit(0.3) + 
-             col("total_revenue") * lit(0.7))))
+            (col("total_rentals") * lit(0.3).cast(FloatType()) + 
+             col("total_revenue") * lit(0.7).cast(FloatType()))))
     
     # Add gold audit fields
     audit_df = add_gold_audit_fields(customer_metrics, "customer_metrics", batch_id)
@@ -596,8 +647,7 @@ def run(spark: SparkSession, db_config: dict, execution_date: str = None) -> Dic
     
     # Define gold tables to process in dependency order
     gold_tables = [
-        ("date_dimension", lambda s, c, b: {"gl_dim_date_rows_processed": 
-            load_to_gold_table(generate_date_dimension(s), c, "gl_dim_date") or 3653}),
+        ("date_dimension", transform_date_dimension),
         ("customer_dimension", transform_customer_dimension),
         ("film_dimension", transform_film_dimension),
         ("store_dimension", transform_store_dimension),
@@ -625,9 +675,10 @@ def run(spark: SparkSession, db_config: dict, execution_date: str = None) -> Dic
             results["total_gold_rows_processed"] += list(table_metrics.values())[0]
             
         except Exception as e:
-            error_msg = f"Failed to process gold {table_name}: {str(e)}"
-            results["errors"].append(error_msg)
+            error_msg = f"CRITICAL FAILURE: Gold transformation failed for {table_name}: {str(e)}"
             print(f"ERROR: {error_msg}")
+            # FAIL FAST: Any gold transformation failure should stop the entire pipeline
+            raise Exception(f"Gold pipeline failure in {table_name}. {error_msg}")
     
     return results
 
