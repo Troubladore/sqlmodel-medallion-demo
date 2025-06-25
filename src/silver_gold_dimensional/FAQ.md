@@ -33,7 +33,7 @@ bronze_key_col = lit(None).cast(StringType())
 
 ---
 
-### **Issue 2: Date Dimension BIGINT Type Mismatch**
+### **Issue 2: Date Dimension BIGINT Type Mismatch (CRITICAL)**
 
 **Problem**: Gold transformation failing with date dimension generation error:
 ```
@@ -43,14 +43,27 @@ The second parameter requires ("INT" or "SMALLINT" or "TINYINT") type, however "
 
 **Root Cause**: Spark 4.0.0 stricter type checking for date arithmetic operations
 
-**Solution**: Explicit type casting in date calculations
+**Solution 1**: Explicit type casting in date calculations (partial fix)
 ```python
 # Cast BIGINT result to INT for date_add function
 .withColumn("calendar_date", 
     expr("date_add('1900-01-01', cast((date_ordinal - 693594) as int))"))
 ```
 
-**Prevention**: Cast arithmetic results to expected types in Spark 4.0.0
+**Solution 2**: Simplified date generation (recommended)
+```python
+# Direct date arithmetic without ordinal conversion
+date_df = spark.range(0, total_days).select(
+    col("id").cast(IntegerType()).alias("days_from_start")
+).withColumn(
+    "calendar_date", 
+    expr(f"date_add('{start_date}', days_from_start)")
+)
+```
+
+**Location**: `src/silver_gold_dimensional/transforms/silver_to_gold_dimensional.py:121`
+
+**Prevention**: Avoid complex ordinal arithmetic; use direct date operations in Spark 4.0.0
 
 ---
 
@@ -76,23 +89,45 @@ customer_df.alias("c").join(address_df.alias("a"), col("c.address_id") == col("a
 
 ---
 
-### **Issue 4: Foreign Key Constraint Violations**
+### **Issue 4: Foreign Key Constraint Violations (CRITICAL)**
 
 **Problem**: Table refresh operations failing due to existing dependencies:
 ```
-cannot drop table pagila_gold.gl_dim_staff because other objects depend on it
+cannot drop table pagila_gold.gl_dim_date because other objects depend on it
+Detail: constraint gl_fact_rental_rental_date_key_fkey on table pagila_gold.gl_fact_rental depends on table pagila_gold.gl_dim_date
+```
+
+**Problem 2**: Truncate operations also fail with FK constraints:
+```
+cannot truncate a table referenced in a foreign key constraint
+Detail: Table "gl_customer_metrics" references "gl_dim_customer"
 ```
 
 **Root Cause**: Dimensional tables have foreign key references from fact tables
 
-**Solution**: Use proper dependency ordering and cascade operations
-```python
-# Drop fact tables first, then dimensions
+**Solution 1**: Drop and recreate entire schema (recommended for development)
+```sql
+-- Nuclear option - clears all FK constraints
+DROP SCHEMA IF EXISTS pagila_gold CASCADE;
+CREATE SCHEMA pagila_gold;
+```
+
+**Solution 2**: Dependency-aware table dropping
+```sql
+-- Drop fact tables first, then dimensions
 DROP TABLE IF EXISTS pagila_gold.gl_fact_rental CASCADE;
+DROP TABLE IF EXISTS pagila_gold.gl_customer_metrics CASCADE;
 DROP TABLE IF EXISTS pagila_gold.gl_dim_customer CASCADE;
 ```
 
-**Prevention**: Design table refresh strategy considering dependency chains
+**Solution 3**: Use CASCADE with TRUNCATE
+```sql
+TRUNCATE TABLE pagila_gold.gl_dim_customer CASCADE;
+```
+
+**Location**: Gold transformation overwrite mode operations
+
+**Prevention**: Design table refresh strategy considering dependency chains, or use schema recreation for full refresh
 
 ---
 
@@ -240,8 +275,10 @@ def fix_date_dimension_types(df):
 
 ### **Pipeline Performance After Fixes**
 - **DAG Success Rate**: 100% after memory and type fixes
-- **Error-Free Execution**: 47.6 seconds end-to-end
+- **Error-Free Execution**: 47.6 seconds end-to-end (silver+gold)  
 - **Data Completeness**: All silver and gold tables populated
+- **Gold Dimension Counts**: customer(599), film(1000), store(2), date(11,323) records
+- **Transformation Time**: ~70 seconds for complete dimensional model
 
 ---
 
