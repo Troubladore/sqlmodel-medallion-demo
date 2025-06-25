@@ -162,10 +162,11 @@ def run_silver_transformation(**context) -> Dict[str, Any]:
     # Initialize Spark session with memory-optimized settings for container environment
     spark = (SparkSession.builder
              .appName(f"Silver_Dimensional_Transform_{execution_date}")
-             # Memory settings for container environment
-             .config("spark.executor.memory", "1g")
-             .config("spark.driver.memory", "1g")
-             .config("spark.executor.cores", "2")
+             # Memory settings for container environment (fixed for Spark 4.0.0 minimum requirements)
+             .config("spark.executor.memory", "512m")
+             .config("spark.driver.memory", "512m")
+             .config("spark.driver.maxResultSize", "256m")
+             .config("spark.executor.cores", "1")
              .config("spark.sql.adaptive.enabled", "true")
              .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
              .config("spark.sql.adaptive.localShuffleReader.enabled", "true")
@@ -209,10 +210,11 @@ def run_gold_transformation(**context) -> Dict[str, Any]:
     # Initialize Spark session with memory-optimized settings for container environment
     spark = (SparkSession.builder
              .appName(f"Gold_Dimensional_Transform_{execution_date}")
-             # Memory settings for container environment
-             .config("spark.executor.memory", "1g")
-             .config("spark.driver.memory", "1g")
-             .config("spark.executor.cores", "2")
+             # Memory settings for container environment (fixed for Spark 4.0.0 minimum requirements)
+             .config("spark.executor.memory", "512m")
+             .config("spark.driver.memory", "512m")
+             .config("spark.driver.maxResultSize", "256m")
+             .config("spark.executor.cores", "1")
              .config("spark.sql.adaptive.enabled", "true")
              .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
              .config("spark.sql.adaptive.localShuffleReader.enabled", "true")

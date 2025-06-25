@@ -77,12 +77,17 @@ def calculate_data_quality_score(df: DataFrame, required_fields: List[str]) -> D
 def add_silver_audit_fields(df: DataFrame, source_table: str, batch_id: str) -> DataFrame:
     """Add comprehensive silver audit trail"""
     
+    # For bronze key mapping, use proper null handling with explicit types
+    if f"br_{source_table}_key" in df.columns:
+        bronze_key_col = col(f"br_{source_table}_key")
+    else:
+        # For synthetic data (address, store), use null string instead of void
+        bronze_key_col = lit(None).cast(StringType())
+    
     return (df
         .withColumn("sl_created_time", current_timestamp())
         .withColumn("sl_updated_time", current_timestamp())
-        .withColumn("sl_source_bronze_key", 
-            # Map bronze key if available, otherwise null
-            col(f"br_{source_table}_key") if f"br_{source_table}_key" in df.columns else lit(None))
+        .withColumn("sl_source_bronze_key", bronze_key_col)
         .withColumn("sl_is_active", lit(True))
         .withColumn("sl_batch_id", lit(batch_id)))
 
@@ -241,14 +246,14 @@ def transform_address_to_silver(spark: SparkSession, db_config: dict, batch_id: 
     
     # Create synthetic address data (in real scenario, would come from proper bronze address)
     address_df = (bronze_df
-        .withColumn("sl_address_key", expr("uuid()"))
+        .withColumn("sl_address_key", expr("uuid()").cast(StringType()))
         .withColumn("address_id", col("address_id").cast(IntegerType()))
-        .withColumn("address", lit("123 Main St"))  # Placeholder
+        .withColumn("address", lit("123 Main St").cast(StringType()))  # Placeholder
         .withColumn("address2", lit(None).cast(StringType()))
-        .withColumn("district", lit("Central"))
-        .withColumn("city_id", lit(1))
-        .withColumn("postal_code", lit("12345"))
-        .withColumn("phone", lit("555-0123"))
+        .withColumn("district", lit("Central").cast(StringType()))
+        .withColumn("city_id", lit(1).cast(IntegerType()))
+        .withColumn("postal_code", lit("12345").cast(StringType()))
+        .withColumn("phone", lit("555-0123").cast(StringType()))
         .withColumn("last_update", current_timestamp())
         .select("sl_address_key", "address_id", "address", "address2", 
                 "district", "city_id", "postal_code", "phone", "last_update")
@@ -276,10 +281,10 @@ def transform_store_to_silver(spark: SparkSession, db_config: dict, batch_id: st
     store_df = (bronze_df
         .select("store_id")
         .distinct()
-        .withColumn("sl_store_key", expr("uuid()"))
+        .withColumn("sl_store_key", expr("uuid()").cast(StringType()))
         .withColumn("store_id", col("store_id").cast(IntegerType()))
-        .withColumn("manager_staff_id", lit(1))
-        .withColumn("address_id", col("store_id"))  # Assume store_id maps to address_id
+        .withColumn("manager_staff_id", lit(1).cast(IntegerType()))
+        .withColumn("address_id", col("store_id").cast(IntegerType()))  # Assume store_id maps to address_id
         .withColumn("last_update", current_timestamp()))
     
     # Add silver audit fields
