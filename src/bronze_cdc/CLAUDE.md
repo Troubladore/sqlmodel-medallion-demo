@@ -410,8 +410,41 @@ SELECT full_row->>'payment_id', full_row->>'amount' FROM cdc_bronze.br_payment_c
 -- Result: Proper JSON extraction working
 ```
 
+---
+
+## 🧬 Evolution Tracking DNA (CRITICAL)
+
+**Every bronze_cdc development session MUST update evolution documentation.**
+
+📚 **CENTRALIZED STANDARDS**: All evolution tracking requirements are defined in:
+
+👉 **[`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../docs/EVOLUTION_TRACKING_STANDARDS.md)** 👈
+
+### **Bronze CDC Specific Requirements**:
+
+**Layer Changelog**: `src/bronze_cdc/CHANGELOG.md` - REQUIRED after ANY changes
+
+**Key Metrics to Track**:
+- Processing latency (end-to-end event processing time)
+- LSN sequence integrity (100% ordered target)
+- JSONB payload integrity and parsing success rate
+- Event throughput and backlog management
+- Real-time data freshness metrics
+
+**Focus Areas for Bronze CDC Evolution**:
+- Real-time processing capabilities (streaming improvements, latency optimization)
+- CDC pattern maturity (LSN handling, payload integrity, event replay)
+- Streaming integration (Kafka, WAL, Delta Live Tables progression)
+- Infrastructure evolution (container orchestration, resource scaling)
+- Business impact (real-time analytics capabilities delivered)
+
+**📖 For complete templates, automation, and standards, see [`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../docs/EVOLUTION_TRACKING_STANDARDS.md)**
+
+---
+
 **🔄 Next Steps**: 
 - Implement true PostgreSQL WAL-based CDC
 - Add Kafka streaming for real-time ingestion  
 - Upgrade to Delta Live Tables for production
 - Implement CDC event replay and compaction
+- **CRITICAL**: Document all streaming improvements in evolution tracking system

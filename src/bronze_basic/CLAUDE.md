@@ -413,11 +413,43 @@ For detailed troubleshooting of common bronze layer issues, see [FAQ.md](FAQ.md)
 
 ---
 
+---
+
+## 🧬 Evolution Tracking DNA (CRITICAL)
+
+**Every bronze_basic development session MUST update evolution documentation.**
+
+📚 **CENTRALIZED STANDARDS**: All evolution tracking requirements are defined in:
+
+👉 **[`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../docs/EVOLUTION_TRACKING_STANDARDS.md)** 👈
+
+### **Bronze Basic Specific Requirements**:
+
+**Layer Changelog**: `src/bronze_basic/CHANGELOG.md` - REQUIRED after ANY changes
+
+**Key Metrics to Track**:
+- Processing rate (rows/second throughput)
+- Memory stability patterns  
+- Error recovery success rate
+- Spark 4.0.0 compatibility lessons
+- Infrastructure evolution (Docker, JDBC, configurations)
+
+**Focus Areas for Bronze Basic Evolution**:
+- Technical decisions (Spark configs, Docker setup, JDBC optimizations)
+- Performance patterns (processing rates, memory usage, error rates)
+- Troubleshooting solutions (common errors and resolutions)
+- Infrastructure compatibility (Spark/Java/Python version matrix)
+
+**📖 For complete templates, automation, and standards, see [`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../docs/EVOLUTION_TRACKING_STANDARDS.md)**
+
+---
+
 **🎯 Success Criteria**: When replicating this pattern, you should achieve similar results:
 - All DAG tasks pass (green checkmarks)
 - Data loaded with proper audit trails
 - No version compatibility issues
 - Comprehensive error handling
 - Production-ready architecture
+- **Evolution documentation updated with lessons learned**
 
-**🚀 Next Steps**: Use this as a template for bronze_cdc, adapting the CDC-specific patterns while preserving the proven technical foundation.
+**🚀 Next Steps**: Use this as a template for bronze_cdc, adapting the CDC-specific patterns while preserving the proven technical foundation. **CRITICAL**: Update evolution documentation to track adaptations and improvements made for CDC implementation.

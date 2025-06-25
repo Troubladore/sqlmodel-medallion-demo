@@ -408,4 +408,36 @@ cp -r src/bronze_basic/transforms/ src/bronze_[new_pattern]/transforms/
 
 ---
 
-**🚀 Next Steps**: Use this bronze_basic methodology as the foundation for other bronze patterns (CDC, streaming, incremental), adapting the specific processing logic while preserving the proven infrastructure and error handling patterns.
+---
+
+## 🧬 Evolution Tracking DNA (CRITICAL)
+
+**Every bronze_basic transform development session MUST update evolution documentation.**
+
+📚 **CENTRALIZED STANDARDS**: All evolution tracking requirements are defined in:
+
+👉 **[`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../../docs/EVOLUTION_TRACKING_STANDARDS.md)** 👈
+
+### **Bronze Basic Transform Specific Requirements**:
+
+**Transform Changelog**: `src/bronze_basic/transforms/CHANGELOG.md` - REQUIRED after ANY changes
+
+**Key Transform Metrics to Track**:
+- Processing rate (rows/second per table transformation)
+- Error isolation success rate (continuing after individual table failures)
+- Audit completeness (100% audit field population)
+- JDBC performance efficiency and throughput
+- Memory stability patterns across table processing
+
+**Focus Areas for Transform Evolution**:
+- Processing methodology (full-refresh patterns, error isolation, audit standards)
+- Performance optimization (JDBC configs, Spark settings, memory management)
+- Error resilience (isolation patterns, recovery, validation frameworks)
+- Standards maturation (coding patterns, configuration management)
+- Replication guidelines (template updates for other bronze patterns)
+
+**📖 For complete templates, automation, and standards, see [`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../../docs/EVOLUTION_TRACKING_STANDARDS.md)**
+
+---
+
+**🚀 Next Steps**: Use this bronze_basic methodology as the foundation for other bronze patterns (CDC, streaming, incremental), adapting the specific processing logic while preserving the proven infrastructure and error handling patterns. **CRITICAL**: Document all adaptations and improvements in the evolution tracking system to build institutional knowledge.

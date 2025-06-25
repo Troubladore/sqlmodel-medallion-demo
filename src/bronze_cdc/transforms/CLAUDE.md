@@ -485,4 +485,36 @@ Phase 4: Delta Live Tables (Databricks) or Snowpipe (Snowflake)
 
 ---
 
-**🚀 Next Steps**: Use this bronze_cdc methodology for real-time analytics, then upgrade to true database CDC (WAL replication) and streaming platforms (Kafka, Delta Live Tables) for production-scale implementations.
+---
+
+## 🧬 Evolution Tracking DNA (CRITICAL)
+
+**Every bronze_cdc transform development session MUST update evolution documentation.**
+
+📚 **CENTRALIZED STANDARDS**: All evolution tracking requirements are defined in:
+
+👉 **[`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../../docs/EVOLUTION_TRACKING_STANDARDS.md)** 👈
+
+### **Bronze CDC Transform Specific Requirements**:
+
+**Transform Changelog**: `src/bronze_cdc/transforms/CHANGELOG.md` - REQUIRED after ANY changes
+
+**Key CDC Transform Metrics to Track**:
+- LSN continuity (perfect sequence integrity, no gaps)
+- Processing latency (end-to-end event processing <5 minutes target)
+- JSONB integrity (payload parsing success rate 100% target)
+- Watermark reliability (state persistence and recovery success)
+- Event ordering accuracy and throughput sustainability
+
+**Focus Areas for CDC Transform Evolution**:
+- Real-time processing methodology (LSN handling, watermark management)
+- CDC pattern maturity (JSONB optimization, operation tracking, event replay)
+- Streaming performance (latency optimization, throughput management)
+- Infrastructure progression (WAL integration, Kafka, Delta Live Tables)
+- Business impact (real-time analytics enablement, data freshness)
+
+**📖 For complete templates, automation, and standards, see [`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../../docs/EVOLUTION_TRACKING_STANDARDS.md)**
+
+---
+
+**🚀 Next Steps**: Use this bronze_cdc methodology for real-time analytics, then upgrade to true database CDC (WAL replication) and streaming platforms (Kafka, Delta Live Tables) for production-scale implementations. **CRITICAL**: Document all streaming infrastructure improvements and real-time capability enhancements in the evolution tracking system.

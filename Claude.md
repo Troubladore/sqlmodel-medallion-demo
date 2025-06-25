@@ -370,7 +370,42 @@ class Trade(TransactionalTableMixin, SQLModel, table=True):
 
 ---
 
-✅  9. Testing & CI
+🧬  9. Platform Evolution Tracking (CRITICAL - Part of Platform DNA)
+
+**Evolution tracking is MANDATORY for all platform work**. Every development session must contribute to the evolution documentation.
+
+📚 **CENTRALIZED STANDARDS**: All evolution tracking requirements, templates, and automation are defined in:
+
+👉 **[`docs/EVOLUTION_TRACKING_STANDARDS.md`](docs/EVOLUTION_TRACKING_STANDARDS.md)** 👈
+
+### **Quick Reference - Required After ANY Code Changes**:
+
+```bash
+# 1. Update layer-specific CHANGELOG.md (ALWAYS REQUIRED)
+vim src/<layer>/CHANGELOG.md  
+
+# 2. Update platform EVOLUTION.md (if major capability)
+vim EVOLUTION.md  
+
+# 3. Create ADR (if architectural decision)
+vim docs/adr/ADR-XXX-<topic>.md  
+
+# 4. Check compliance
+./scripts/check_evolution_status.sh
+```
+
+### **Evolution DNA Checklist**:
+- [ ] Layer-specific CHANGELOG.md updated
+- [ ] Platform EVOLUTION.md updated (if major capability)
+- [ ] ADR created (if architectural decision) 
+- [ ] Platform metrics updated (if significant change)
+- [ ] Migration guide created (if breaking change)
+
+**📖 For complete requirements, templates, automation, and standards, see [`docs/EVOLUTION_TRACKING_STANDARDS.md`](docs/EVOLUTION_TRACKING_STANDARDS.md)**
+
+---
+
+✅  10. Testing & CI
 Unit tests live in tests/ and use an ephemeral Postgres via pytest-docker.
 
 Data tests (row counts, hash totals) are in Airflow QualityTasks and fail the DAG.

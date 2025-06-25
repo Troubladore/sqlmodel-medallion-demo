@@ -535,4 +535,36 @@ For comprehensive troubleshooting and resolution of silver-gold pipeline issues,
 
 ---
 
-**🚀 Next Steps**: Use this dimensional methodology for business intelligence, reporting, and analytics. Extend with slowly changing dimensions (SCD Type 2) and additional fact tables as business requirements evolve.
+---
+
+## 🧬 Evolution Tracking DNA (CRITICAL)
+
+**Every silver-gold transform development session MUST update evolution documentation.**
+
+📚 **CENTRALIZED STANDARDS**: All evolution tracking requirements are defined in:
+
+👉 **[`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../../docs/EVOLUTION_TRACKING_STANDARDS.md)** 👈
+
+### **Silver-Gold Transform Specific Requirements**:
+
+**Transform Changelog**: `src/silver_gold_dimensional/transforms/CHANGELOG.md` - REQUIRED after ANY changes
+
+**Key Transform Metrics to Track**:
+- Dimensional model processing speed (bronze → silver → gold pipeline time)
+- Star schema population success rates (dimension/fact table completion)
+- Query performance impact (BI response time improvements)
+- Data lineage compliance (strict silver/gold only processing)
+- Type safety compliance (Spark 4.0.0 JDBC compatibility)
+
+**Focus Areas for Silver-Gold Transform Evolution**:
+- Dimensional modeling methodology (star schema patterns, SCD implementation)
+- Data lineage enforcement (strict bronze→silver→gold compliance)
+- Type safety improvements (JDBC compatibility, casting patterns)
+- Performance optimization (query times, processing speed, memory efficiency)
+- Business intelligence enablement (analytics capabilities, BI readiness)
+
+**📖 For complete templates, automation, and standards, see [`docs/EVOLUTION_TRACKING_STANDARDS.md`](../../../docs/EVOLUTION_TRACKING_STANDARDS.md)**
+
+---
+
+**🚀 Next Steps**: Use this dimensional methodology for business intelligence, reporting, and analytics. Extend with slowly changing dimensions (SCD Type 2) and additional fact tables as business requirements evolve. **CRITICAL**: Document all dimensional model enhancements in the evolution tracking system.
