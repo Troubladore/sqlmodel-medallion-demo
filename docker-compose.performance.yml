@@ -1,0 +1,78 @@
+# 🚀 High-Performance Configuration for High-End Workstations
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.performance.yml up -d
+# 
+# Target: Machines with >32GB RAM, 12+ CPU cores (desktop dev rigs, workstations)
+# Expected Performance: Maximum speed, 2-3x faster than lite configuration
+
+services:
+  airflow-common: &airflow-common-performance
+    environment:
+      # High-performance Spark configuration
+      SPARK_DRIVER_MEMORY: 2g
+      SPARK_EXECUTOR_MEMORY: 4g
+      SPARK_DRIVER_MAX_RESULT_SIZE: 1g
+      SPARK_SQL_ADAPTIVE_COALESCE_PARTITIONS_MIN_PARTITION_SIZE: 64MB
+      SPARK_SQL_ADAPTIVE_ADVISORY_PARTITION_SIZE: 256MB
+      
+      # Enhanced JVM settings for performance
+      SPARK_DRIVER_JAVA_OPTIONS: >-
+        -XX:+UseG1GC 
+        -XX:G1HeapRegionSize=32m 
+        -XX:+UseStringDeduplication
+        -XX:MaxGCPauseMillis=200
+        -Djava.security.egd=file:/dev/./urandom
+      
+      SPARK_EXECUTOR_JAVA_OPTIONS: >-
+        -XX:+UseG1GC 
+        -XX:G1HeapRegionSize=16m 
+        -XX:+UseStringDeduplication
+        -XX:MaxGCPauseMillis=100
+
+  airflow-webserver:
+    <<: *airflow-common-performance
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+
+  airflow-scheduler:
+    <<: *airflow-common-performance
+    deploy:
+      resources:
+        limits:
+          memory: 8G  # Higher for Spark jobs
+          cpus: '4'
+        reservations:
+          memory: 4G
+          cpus: '2'
+
+  airflow-worker:
+    <<: *airflow-common-performance
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: '3'
+        reservations:
+          memory: 3G
+          cpus: '1.5'
+
+  # Database gets more resources too
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
+    environment:
+      - POSTGRES_SHARED_BUFFERS=512MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB
+      - POSTGRES_WORK_MEM=32MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=256MB

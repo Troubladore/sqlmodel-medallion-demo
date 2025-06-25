@@ -1,0 +1,76 @@
+# ⚖️ Balanced Configuration for Better Developer Machines
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.balanced.yml up -d
+# 
+# Target: Better developer machines (16-32GB RAM, 8+ cores)
+# Expected Performance: Good balance of speed and stability
+
+services:
+  airflow-common: &airflow-common-balanced
+    environment:
+      # Balanced Spark configuration
+      SPARK_DRIVER_MEMORY: 1g
+      SPARK_EXECUTOR_MEMORY: 2g
+      SPARK_DRIVER_MAX_RESULT_SIZE: 512m
+      SPARK_SQL_ADAPTIVE_COALESCE_PARTITIONS_MIN_PARTITION_SIZE: 32MB
+      SPARK_SQL_ADAPTIVE_ADVISORY_PARTITION_SIZE: 128MB
+      
+      # Balanced JVM settings
+      SPARK_DRIVER_JAVA_OPTIONS: >-
+        -XX:+UseG1GC 
+        -XX:G1HeapRegionSize=16m 
+        -XX:MaxGCPauseMillis=150
+        -Djava.security.egd=file:/dev/./urandom
+      
+      SPARK_EXECUTOR_JAVA_OPTIONS: >-
+        -XX:+UseG1GC 
+        -XX:G1HeapRegionSize=16m 
+        -XX:MaxGCPauseMillis=150
+
+  airflow-webserver:
+    <<: *airflow-common-balanced
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.5'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  airflow-scheduler:
+    <<: *airflow-common-balanced
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+
+  airflow-worker:
+    <<: *airflow-common-balanced
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2'
+        reservations:
+          memory: 1.5G
+          cpus: '1'
+
+  # Moderate database resources
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.5'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    environment:
+      - POSTGRES_SHARED_BUFFERS=256MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=768MB
+      - POSTGRES_WORK_MEM=16MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=128MB

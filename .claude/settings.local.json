@@ -31,7 +31,11 @@
       "Bash(sc.exe query:*)",
       "Bash(mount)",
       "WebFetch(domain:spark.apache.org)",
-      "Bash(./check_bronze_status.sh:*)"
+      "Bash(./check_bronze_status.sh:*)",
+      "Bash(./scripts/simple-performance-config.sh:*)",
+      "Bash(bash:*)",
+      "Bash(dos2unix:*)",
+      "Bash(sed:*)"
     ],
     "deny": []
   }
