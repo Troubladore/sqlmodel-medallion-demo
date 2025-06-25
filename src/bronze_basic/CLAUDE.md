@@ -395,6 +395,24 @@ class BrCustomerCdc(SQLModel, table=True):
 
 ---
 
+## 📚 Troubleshooting & Lessons Learned
+
+### **Critical Issues Reference**
+For detailed troubleshooting of common bronze layer issues, see [FAQ.md](FAQ.md):
+
+- **Memory Configuration**: Spark 4.0.0 minimum requirements (471MB+)
+- **Docker Resource Limits**: Container memory allocation strategies
+- **SIGKILL Errors**: Process termination and recovery procedures
+- **Performance Optimization**: Benchmarks and monitoring guidelines
+
+### **Key Takeaways from Production Issues**
+1. **Spark 4.0.0 Memory Requirements**: Always allocate minimum 512MB for driver and executor
+2. **Container Resource Planning**: Docker containers need 2GB+ for Spark workloads
+3. **Configuration Consistency**: Use explicit values rather than environment variables for critical settings
+4. **Monitoring Approach**: Watch for zombie jobs, SIGKILL signals, and memory usage patterns
+
+---
+
 **🎯 Success Criteria**: When replicating this pattern, you should achieve similar results:
 - All DAG tasks pass (green checkmarks)
 - Data loaded with proper audit trails
